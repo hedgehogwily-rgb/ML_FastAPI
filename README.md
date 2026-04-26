@@ -1,18 +1,29 @@
 🤖 🤖 ML FastAPI
 
-📝 День 1: fastapi_churn_day01
+📝 День 2: fastapi_churn_day02
 
-День 1 — Базовое приложение FastAPI
+День 2 — Pydantic модели для признаков churn
 
 🎯 Цель дня
-Поднять минимальное приложение FastAPI и убедиться что оно работает.
+Описать структуру входных данных для задачи churn через Pydantic.
 
 📋 Задачи
-1. 📦 Установить fastapi и uvicorn
-2. 📄 Создать файл main.py
-3. 🚀 Создать объект приложения app = FastAPI()
-4. 🔗 Добавить эндпоинт GET / который возвращает словарь {"message": "ml churn service is running"}
-5. ▶️ Запустить приложение командой uvicorn main:app --reload и проверить что сервис отвечает
+1. 📊 Создать Pydantic модель FeatureVectorChurn с полями:
+   - monthly_fee float
+   - usage_hours float
+   - support_requests int
+   - account_age_months int
+   - failed_payments int
+   - region str
+   - device_type str
+   - payment_method str
+   - autopay_enabled int
+
+2. 📋 Создать модель DatasetRowChurn для строки тренировочного датасета которая включает все те же признаки и дополнительное поле churn int
+
+3. 🔗 Добавить временный эндпоинт POST /predict который принимает FeatureVectorChurn и возвращает эти же данные в ответе чтобы убедиться что схема работает
+
+4. 🔍 Проверить структуру входных и выходных данных через /docs
 
 ---
 Удачи с реализацией! 🚀
