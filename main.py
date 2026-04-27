@@ -1,30 +1,9 @@
 from fastapi import FastAPI
-from pydantic import BaseModel
+from dataset_service import ChurnDatasetService
+from schemas import FeatureVectorChurn, DatasetRowChurn
 
 app = FastAPI()
-
-class FeatureVectorChurn(BaseModel):
-    monthly_fee: float
-    usage_hours: float
-    support_requests: int
-    account_age_months: int
-    failed_payments: int
-    region: str
-    device_type: str
-    payment_method: str
-    autopay_enabled: int
-
-class DatasetRowChurn(BaseModel):
-    monthly_fee: float
-    usage_hours: float
-    support_requests: int
-    account_age_months: int
-    failed_payments: int
-    region: str
-    device_type: str
-    payment_method: str
-    autopay_enabled: int
-    churn: int
+dataset_service = ChurnDatasetService("data/churn_dataset.csv")
 
 @app.get("/")
 def read_root():
@@ -33,3 +12,13 @@ def read_root():
 @app.post("/predict", response_model=FeatureVectorChurn)
 def predict(feature_vector: FeatureVectorChurn):
     return feature_vector
+
+
+@app.get("/dataset/preview", response_model=list[DatasetRowChurn])
+def get_dataset_preview(limit: int = 5):
+    return dataset_service.preview(limit)
+
+
+@app.get("/dataset/info")
+def get_dataset_info():
+    return dataset_service.info()
