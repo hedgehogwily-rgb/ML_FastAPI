@@ -46,6 +46,7 @@ class ChurnDatasetService:
     def info(self) -> dict:
         self._ensure_loaded()
         churn_distribution: dict[str, int] = {}
+        feature_columns = [column for column in self.columns if column != "churn"]
         for row in self.rows:
             churn_value = str(row["churn"])
             churn_distribution[churn_value] = churn_distribution.get(churn_value, 0) + 1
@@ -53,6 +54,6 @@ class ChurnDatasetService:
         return {
             "rows_count": len(self.rows),
             "columns_count": len(self.columns),
-            "feature_names": self.columns,
+            "feature_names": feature_columns,
             "churn_distribution": churn_distribution,
         }
