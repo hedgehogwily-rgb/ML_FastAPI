@@ -1,6 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from dataset_service import ChurnDatasetService
-from schemas import FeatureVectorChurn, DatasetRowChurn
+from schemas import FeatureVectorChurn, DatasetRowChurn, SplitInfoResponse
 
 app = FastAPI()
 dataset_service = ChurnDatasetService("data/churn_dataset.csv")
@@ -15,10 +15,15 @@ def predict(feature_vector: FeatureVectorChurn):
 
 
 @app.get("/dataset/preview", response_model=list[DatasetRowChurn])
-def get_dataset_preview(limit: int = 5):
+def get_dataset_preview(limit: int = Query(5, ge=0)):
     return dataset_service.preview(limit)
 
 
 @app.get("/dataset/info")
 def get_dataset_info():
     return dataset_service.info()
+
+
+@app.get("/dataset/split-info", response_model=SplitInfoResponse)
+def get_split_info(test_size: float = Query(0.2, gt=0, lt=1), random_state: int = Query(42)):
+    return dataset_service.split_info(test_size=test_size, random_state=random_state)

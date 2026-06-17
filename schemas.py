@@ -24,3 +24,10 @@ class DatasetRowChurn(BaseModel):
     payment_method: str
     autopay_enabled: int
     churn: int
+
+
+class SplitInfoResponse(BaseModel):
+    train_size: int
+    test_size: int
+    train_churn_distribution: dict[str, float]
+    test_churn_distribution: dict[str, float]
