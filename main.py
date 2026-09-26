@@ -1,6 +1,7 @@
-from fastapi import FastAPI, Query
-from dataset_service import ChurnDatasetService
-from schemas import FeatureVectorChurn, DatasetRowChurn, SplitInfoResponse
+from fastapi import FastAPI, HTTPException, Query
+from dataset_service import ChurnDatasetService, EmptyDatasetError
+from model_service import evaluate_churn_model, train_churn_model
+from schemas import FeatureVectorChurn, DatasetRowChurn, SplitInfoResponse, TrainMetricsResponse
 
 app = FastAPI()
 dataset_service = ChurnDatasetService("data/churn_dataset.csv")
@@ -27,3 +28,19 @@ def get_dataset_info():
 @app.get("/dataset/split-info", response_model=SplitInfoResponse)
 def get_split_info(test_size: float = Query(0.2, gt=0, lt=1), random_state: int = Query(42)):
     return dataset_service.split_info(test_size=test_size, random_state=random_state)
+
+
+@app.post("/model/train", response_model=TrainMetricsResponse)
+def train_model(test_size: float = Query(0.2, gt=0, lt=1), random_state: int = Query(42)):
+    try:
+        train_data, test_data = dataset_service.split_data(
+            test_size=test_size,
+            random_state=random_state,
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Dataset file is not loaded")
+    except EmptyDatasetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    pipeline = train_churn_model(train_data)
+    return evaluate_churn_model(pipeline, test_data)

@@ -35,6 +35,10 @@ class PreparedData:
     categorical_features: list[str]
 
 
+class EmptyDatasetError(Exception):
+    pass
+
+
 class ChurnDatasetService:
     def __init__(self, csv_path: str):
         self.csv_path = Path(csv_path)
@@ -44,6 +48,9 @@ class ChurnDatasetService:
     def _ensure_loaded(self) -> None:
         if self._loaded:
             return
+
+        if not self.csv_path.is_file():
+            raise FileNotFoundError(f"Dataset file not found: {self.csv_path}")
 
         self.df = pd.read_csv(
             self.csv_path,
@@ -101,7 +108,12 @@ class ChurnDatasetService:
 
     def prepare_data(self) -> PreparedData:
         self._ensure_loaded()
+        if self.df.empty:
+            raise EmptyDatasetError("Dataset is empty")
         X, y = self._clean_dataframe(self.df)
+        if X.empty:
+            raise EmptyDatasetError("Dataset has no rows with a valid churn label")
+
         return PreparedData(
             X=X, 
             y=y, 

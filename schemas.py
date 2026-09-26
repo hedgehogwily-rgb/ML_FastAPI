@@ -31,3 +31,8 @@ class SplitInfoResponse(BaseModel):
     test_size: int
     train_churn_distribution: dict[str, float]
     test_churn_distribution: dict[str, float]
+
+
+class TrainMetricsResponse(BaseModel):
+    accuracy: float
+    f1: float
