@@ -1,3 +1,7 @@
+import pickle
+from datetime import datetime
+from pathlib import Path
+
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
@@ -5,7 +9,15 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from dataset_service import CATEGORICAL_FEATURES, NUMERIC_FEATURES, PreparedData
-from schemas import TrainMetricsResponse
+from schemas import ModelStatusResponse, TrainMetricsResponse
+
+MODEL_PATH = "models/churn_model.pkl"
+INFO_PATH = "models/churn_model_info.pkl"
+
+_pipeline: Pipeline | None = None
+_trained_at: str | None = None
+_accuracy: float | None = None
+_f1: float | None = None
 
 
 def build_churn_pipeline(
@@ -32,6 +44,98 @@ def build_churn_pipeline(
             ("preprocessor", preprocessor),
             ("classifier", LogisticRegression(max_iter=1000, random_state=42)),
         ]
+    )
+
+
+def _ensure_models_dir() -> None:
+    Path(MODEL_PATH).parent.mkdir(parents=True, exist_ok=True)
+
+
+def save_churn_model(pipeline: Pipeline, path: str = MODEL_PATH) -> None:
+    _ensure_models_dir()
+    with open(path, "wb") as f:
+        pickle.dump(pipeline, f)
+
+
+def load_churn_model(path: str = MODEL_PATH) -> Pipeline:
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+
+def _clear_loaded_model() -> None:
+    global _pipeline, _trained_at, _accuracy, _f1
+    _pipeline = None
+    _trained_at = None
+    _accuracy = None
+    _f1 = None
+
+
+def _store_loaded_model(
+    pipeline: Pipeline,
+    trained_at: str | None,
+    accuracy: float | None,
+    f1: float | None,
+) -> None:
+    global _pipeline, _trained_at, _accuracy, _f1
+    _pipeline = pipeline
+    _trained_at = trained_at
+    _accuracy = accuracy
+    _f1 = f1
+
+
+def save_model_info(accuracy: float, f1: float, trained_at: str, path: str = INFO_PATH) -> None:
+    _ensure_models_dir()
+    with open(path, "wb") as f:
+        pickle.dump(
+            {"trained_at": trained_at, "accuracy": accuracy, "f1": f1},
+            f,
+        )
+
+
+def load_model_info(path: str = INFO_PATH) -> dict | None:
+    try:
+        with open(path, "rb") as f:
+            info = pickle.load(f)
+    except FileNotFoundError:
+        return None
+    if not isinstance(info, dict) or "pipeline" in info:
+        return None
+    return info
+
+
+def persist_trained_model(pipeline: Pipeline, metrics: TrainMetricsResponse) -> None:
+    trained_at = datetime.now().isoformat(timespec="seconds")
+    save_churn_model(pipeline)
+    save_model_info(metrics.accuracy, metrics.f1, trained_at)
+    _store_loaded_model(pipeline, trained_at, metrics.accuracy, metrics.f1)
+
+
+def load_saved_model() -> None:
+    try:
+        pipeline = load_churn_model()
+    except FileNotFoundError:
+        _clear_loaded_model()
+        return
+
+    info = load_model_info()
+    if info is None:
+        _store_loaded_model(pipeline, None, None, None)
+        return
+
+    _store_loaded_model(
+        pipeline,
+        str(info["trained_at"]),
+        float(info["accuracy"]),
+        float(info["f1"]),
+    )
+
+
+def get_model_status() -> ModelStatusResponse:
+    return ModelStatusResponse(
+        is_trained=_pipeline is not None,
+        trained_at=_trained_at,
+        accuracy=_accuracy,
+        f1=_f1,
     )
 
 

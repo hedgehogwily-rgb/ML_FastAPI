@@ -36,3 +36,10 @@ class SplitInfoResponse(BaseModel):
 class TrainMetricsResponse(BaseModel):
     accuracy: float
     f1: float
+
+
+class ModelStatusResponse(BaseModel):
+    is_trained: bool
+    trained_at: str | None
+    accuracy: float | None
+    f1: float | None
