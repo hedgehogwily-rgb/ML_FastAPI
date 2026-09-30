@@ -43,3 +43,8 @@ class ModelStatusResponse(BaseModel):
     trained_at: str | None
     accuracy: float | None
     f1: float | None
+
+
+class PredictionResponseChurn(BaseModel):
+    prediction: int
+    probabilities: dict[str, float]

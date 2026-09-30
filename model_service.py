@@ -1,7 +1,7 @@
 import pickle
+import pandas as pd
 from datetime import datetime
 from pathlib import Path
-
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
@@ -9,7 +9,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from dataset_service import CATEGORICAL_FEATURES, NUMERIC_FEATURES, PreparedData
-from schemas import ModelStatusResponse, TrainMetricsResponse
+from schemas import FeatureVectorChurn, ModelStatusResponse, PredictionResponseChurn, TrainMetricsResponse
 
 MODEL_PATH = "models/churn_model.pkl"
 INFO_PATH = "models/churn_model_info.pkl"
@@ -154,3 +154,12 @@ def evaluate_churn_model(pipeline: Pipeline, test_data: PreparedData) -> TrainMe
         accuracy=float(accuracy_score(test_data.y, y_pred)),
         f1=float(f1_score(test_data.y, y_pred, zero_division=0)),
     )
+
+def predict_churn(feature_vector: FeatureVectorChurn) -> PredictionResponseChurn:
+    pipeline = _pipeline
+    row = pd.DataFrame([feature_vector.model_dump()])
+    predicted = int(pipeline.predict(row)[0])
+    proba = pipeline.predict_proba(row)[0]
+    classes = pipeline.named_steps["classifier"].classes_
+    probabilities = {str(label): float(value) for label, value in zip(classes, proba)}
+    return PredictionResponseChurn(prediction=predicted, probabilities=probabilities)

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Body
 from dataset_service import ChurnDatasetService, EmptyDatasetError
 from model_service import (
     evaluate_churn_model,
@@ -6,6 +6,7 @@ from model_service import (
     load_saved_model,
     persist_trained_model,
     train_churn_model,
+    predict_churn,
 )
 from schemas import (
     DatasetRowChurn,
@@ -13,6 +14,7 @@ from schemas import (
     ModelStatusResponse,
     SplitInfoResponse,
     TrainMetricsResponse,
+    PredictionResponseChurn,
 )
 
 app = FastAPI()
@@ -23,9 +25,93 @@ load_saved_model()
 def read_root():
     return {"message": "ml churn service is running"}
 
-@app.post("/predict", response_model=FeatureVectorChurn)
-def predict(feature_vector: FeatureVectorChurn):
-    return feature_vector
+@app.post(
+    "/predict",
+    response_model=PredictionResponseChurn | list[PredictionResponseChurn],
+    responses={
+        200: {
+            "description": "Предсказанный класс и вероятности классов",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "one_client": {
+                            "summary": "Ответ для одного клиента",
+                            "value": {
+                                "prediction": 0,
+                                "probabilities": {"0": 0.83, "1": 0.17},
+                            },
+                        },
+                        "several_clients": {
+                            "summary": "Ответ для списка",
+                            "value": [
+                                {"prediction": 1, "probabilities": {"0": 0.31, "1": 0.69}},
+                                {"prediction": 0, "probabilities": {"0": 0.91, "1": 0.09}},
+                            ],
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+def predict(payload: list[FeatureVectorChurn] | FeatureVectorChurn = Body(
+    openapi_examples={
+        "one_client": {
+            "summary": "Один клиент",
+            "value": {
+                "monthly_fee": 9.99,
+                "usage_hours": 27.92,
+                "support_requests": 1,
+                "account_age_months": 14,
+                "failed_payments": 1,
+                "region": "america",
+                "device_type": "desktop",
+                "payment_method": "card",
+                "autopay_enabled": 1,
+            }
+        },
+        "multiple_clients": {
+            "summary": "Несколько клиентов",
+            "value": [
+                {
+                    "monthly_fee": 9.99,
+                    "usage_hours": 4.0,
+                    "support_requests": 6,
+                    "account_age_months": 2,
+                    "failed_payments": 4,
+                    "region": "asia",
+                    "device_type": "mobile",
+                    "payment_method": "crypto",
+                    "autopay_enabled": 0,
+                },
+                {
+                    "monthly_fee": 29.99,
+                    "usage_hours": 40.0,
+                    "support_requests": 0,
+                    "account_age_months": 24,
+                    "failed_payments": 0,
+                    "region": "europe",
+                    "device_type": "desktop",
+                    "payment_method": "card",
+                    "autopay_enabled": 1,
+                },
+            ]
+        }
+    }
+)):
+    model_status = get_model_status()
+    if not model_status.is_trained:
+        raise HTTPException(status_code=400, detail="Model is not trained")
+
+    if isinstance(payload, list):
+        predictions = []
+        for feature_vector in payload:
+            prediction = predict_churn(feature_vector)
+            predictions.append(prediction)
+        return predictions
+    else:
+        prediction = predict_churn(payload)
+        return prediction
 
 
 @app.get("/dataset/preview", response_model=list[DatasetRowChurn])
