@@ -4,12 +4,14 @@ from datetime import datetime
 from pathlib import Path
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
+from typing import Any
 from dataset_service import CATEGORICAL_FEATURES, NUMERIC_FEATURES, PreparedData
-from schemas import FeatureVectorChurn, ModelStatusResponse, PredictionResponseChurn, TrainMetricsResponse
+from schemas import FeatureVectorChurn, ModelStatusResponse, PredictionResponseChurn, TrainMetricsResponse, TrainingConfigChurn
 
 MODEL_PATH = "models/churn_model.pkl"
 INFO_PATH = "models/churn_model_info.pkl"
@@ -18,31 +20,39 @@ _pipeline: Pipeline | None = None
 _trained_at: str | None = None
 _accuracy: float | None = None
 _f1: float | None = None
+_model_type: str | None = None
+_hyperparameters: dict[str, Any] | None = None
+
+
+class UnknownModelTypeError(Exception):
+    pass
+
+
+def build_classifier(config: TrainingConfigChurn):
+    if config.model_type == "logreg":
+        return LogisticRegression(**config.hyperparameters)
+    if config.model_type == "random_forest":
+        return RandomForestClassifier(**config.hyperparameters)
+    raise UnknownModelTypeError(f"Unknown model type: {config.model_type}")
 
 
 def build_churn_pipeline(
-    numeric_features: list[str] | None = None,
-    categorical_features: list[str] | None = None,
+    config: TrainingConfigChurn,
 ) -> Pipeline:
-    if numeric_features is None:
-        numeric_features = list(NUMERIC_FEATURES)
-    if categorical_features is None:
-        categorical_features = list(CATEGORICAL_FEATURES)
-
     preprocessor = ColumnTransformer(
         transformers=[
-            ("numeric", StandardScaler(), numeric_features),
+            ("numeric", StandardScaler(), list(NUMERIC_FEATURES)),
             (
                 "categorical",
                 OneHotEncoder(handle_unknown="ignore", sparse_output=False),
-                categorical_features,
+                list(CATEGORICAL_FEATURES),
             ),
         ]
     )
     return Pipeline(
         steps=[
             ("preprocessor", preprocessor),
-            ("classifier", LogisticRegression(max_iter=1000, random_state=42)),
+            ("classifier", build_classifier(config)),
         ]
     )
 
@@ -63,31 +73,36 @@ def load_churn_model(path: str = MODEL_PATH) -> Pipeline:
 
 
 def _clear_loaded_model() -> None:
-    global _pipeline, _trained_at, _accuracy, _f1
+    global _pipeline, _trained_at, _accuracy, _f1, _model_type, _hyperparameters
     _pipeline = None
     _trained_at = None
     _accuracy = None
     _f1 = None
-
+    _model_type = None
+    _hyperparameters = None
 
 def _store_loaded_model(
     pipeline: Pipeline,
     trained_at: str | None,
     accuracy: float | None,
     f1: float | None,
+    model_type: str | None,
+    hyperparameters: dict[str, Any] | None,
 ) -> None:
-    global _pipeline, _trained_at, _accuracy, _f1
+    global _pipeline, _trained_at, _accuracy, _f1, _model_type, _hyperparameters
     _pipeline = pipeline
     _trained_at = trained_at
     _accuracy = accuracy
     _f1 = f1
+    _model_type = model_type
+    _hyperparameters = hyperparameters
 
 
-def save_model_info(accuracy: float, f1: float, trained_at: str, path: str = INFO_PATH) -> None:
+def save_model_info(accuracy: float, f1: float, trained_at: str, model_type: str, hyperparameters: dict[str, Any], path: str = INFO_PATH) -> None:
     _ensure_models_dir()
     with open(path, "wb") as f:
         pickle.dump(
-            {"trained_at": trained_at, "accuracy": accuracy, "f1": f1},
+            {"trained_at": trained_at, "accuracy": accuracy, "f1": f1, "model_type": model_type, "hyperparameters": hyperparameters},
             f,
         )
 
@@ -103,11 +118,11 @@ def load_model_info(path: str = INFO_PATH) -> dict | None:
     return info
 
 
-def persist_trained_model(pipeline: Pipeline, metrics: TrainMetricsResponse) -> None:
+def persist_trained_model(pipeline: Pipeline, metrics: TrainMetricsResponse, config: TrainingConfigChurn) -> None:
     trained_at = datetime.now().isoformat(timespec="seconds")
     save_churn_model(pipeline)
-    save_model_info(metrics.accuracy, metrics.f1, trained_at)
-    _store_loaded_model(pipeline, trained_at, metrics.accuracy, metrics.f1)
+    save_model_info(metrics.accuracy, metrics.f1, trained_at, config.model_type, config.hyperparameters)
+    _store_loaded_model(pipeline, trained_at, metrics.accuracy, metrics.f1, config.model_type, config.hyperparameters)
 
 
 def load_saved_model() -> None:
@@ -119,7 +134,7 @@ def load_saved_model() -> None:
 
     info = load_model_info()
     if info is None:
-        _store_loaded_model(pipeline, None, None, None)
+        _store_loaded_model(pipeline, None, None, None, None, None)
         return
 
     _store_loaded_model(
@@ -127,6 +142,8 @@ def load_saved_model() -> None:
         str(info["trained_at"]),
         float(info["accuracy"]),
         float(info["f1"]),
+        info.get("model_type"),
+        info.get("hyperparameters"),
     )
 
 
@@ -136,13 +153,14 @@ def get_model_status() -> ModelStatusResponse:
         trained_at=_trained_at,
         accuracy=_accuracy,
         f1=_f1,
+        model_type=_model_type,
+        hyperparameters=_hyperparameters,
     )
 
 
-def train_churn_model(train_data: PreparedData) -> Pipeline:
+def train_churn_model(config: TrainingConfigChurn, train_data: PreparedData) -> Pipeline:
     pipeline = build_churn_pipeline(
-        numeric_features=train_data.numeric_features,
-        categorical_features=train_data.categorical_features,
+        config=config,
     )
     pipeline.fit(train_data.X, train_data.y)
     return pipeline

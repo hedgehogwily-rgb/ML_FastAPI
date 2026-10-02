@@ -7,6 +7,7 @@ from model_service import (
     persist_trained_model,
     train_churn_model,
     predict_churn,
+    UnknownModelTypeError,
 )
 from schemas import (
     DatasetRowChurn,
@@ -15,7 +16,9 @@ from schemas import (
     SplitInfoResponse,
     TrainMetricsResponse,
     PredictionResponseChurn,
+    TrainingConfigChurn,
 )
+
 
 app = FastAPI()
 dataset_service = ChurnDatasetService("data/churn_dataset.csv")
@@ -130,20 +133,34 @@ def get_split_info(test_size: float = Query(0.2, gt=0, lt=1), random_state: int 
 
 
 @app.post("/model/train", response_model=TrainMetricsResponse)
-def train_model(test_size: float = Query(0.2, gt=0, lt=1), random_state: int = Query(42)):
+def train_model(config: TrainingConfigChurn = Body(
+    openapi_examples={
+        "logreg": {
+            "summary": "Логистическая регрессия",
+            "value": {
+                "model_type": "logreg",
+                "hyperparameters": {"C": 1.0, "max_iter": 1000, "random_state": 42},
+            }
+        },
+    }
+), test_size: float = Query(0.2, gt=0, lt=1), random_state: int = Query(42)):
     try:
         train_data, test_data = dataset_service.split_data(
             test_size=test_size,
             random_state=random_state,
         )
+        pipeline = train_churn_model(config=config, train_data=train_data)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Dataset file is not loaded")
     except EmptyDatasetError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except UnknownModelTypeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except TypeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid hyperparameters: {exc}")
 
-    pipeline = train_churn_model(train_data)
     metrics = evaluate_churn_model(pipeline, test_data)
-    persist_trained_model(pipeline, metrics)
+    persist_trained_model(pipeline, metrics, config)
     return metrics
 
 

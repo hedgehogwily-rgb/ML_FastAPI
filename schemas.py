@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from typing import Any
 
 
 class FeatureVectorChurn(BaseModel):
@@ -43,8 +44,15 @@ class ModelStatusResponse(BaseModel):
     trained_at: str | None
     accuracy: float | None
     f1: float | None
+    model_type: str | None
+    hyperparameters: dict[str, Any] | None
 
 
 class PredictionResponseChurn(BaseModel):
     prediction: int
     probabilities: dict[str, float]
+
+
+class TrainingConfigChurn(BaseModel):
+    model_type: str
+    hyperparameters: dict[str, Any]
