@@ -167,3 +167,8 @@ def train_model(config: TrainingConfigChurn = Body(
 @app.get("/model/status", response_model=ModelStatusResponse)
 def model_status():
     return get_model_status()
+
+
+@app.get("/model/schema", response_model=dict)
+def get_model_schema():
+    return dataset_service.schema()

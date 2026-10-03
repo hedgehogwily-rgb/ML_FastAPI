@@ -1,7 +1,7 @@
 from pathlib import Path
 from dataclasses import dataclass
 import pandas as pd
-from schemas import DatasetRowChurn, SplitInfoResponse
+from schemas import DatasetRowChurn, SplitInfoResponse, FeatureVectorChurn
 from sklearn.model_selection import train_test_split
 
 
@@ -105,6 +105,20 @@ class ChurnDatasetService:
             "feature_names": feature_columns,
             "churn_distribution": churn_distribution,
         }
+
+    def schema(self) -> dict:
+        features = []
+        for name, field in FeatureVectorChurn.model_fields.items():
+
+            type_name = field.annotation.__name__
+            role = "numeric" if name in NUMERIC_FEATURES else "categorical"
+            
+            features.append({
+                "name": name,
+                "type": type_name,
+                "role": role,
+            })
+        return {"features": features}
 
     def prepare_data(self) -> PreparedData:
         self._ensure_loaded()
