@@ -1,4 +1,6 @@
-from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi import FastAPI, HTTPException, Query, Body, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from dataset_service import ChurnDatasetService, EmptyDatasetError
 from model_service import (
     evaluate_churn_model,
@@ -17,12 +19,17 @@ from schemas import (
     TrainMetricsResponse,
     PredictionResponseChurn,
     TrainingConfigChurn,
+    ErrorResponse,
 )
 
 
 app = FastAPI()
 dataset_service = ChurnDatasetService("data/churn_dataset.csv")
 load_saved_model()
+
+
+def error_detail(code: str, message: str, details: dict | None = None) -> dict:
+    return ErrorResponse(code=code, message=message, details=details or {}).model_dump()
 
 @app.get("/")
 def read_root():
@@ -54,7 +61,57 @@ def read_root():
                     }
                 }
             },
-        }
+        },
+        400: {
+            "description": "Модель ещё не обучена или тело запроса не прошло проверку",
+            "model": ErrorResponse,
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "model_not_trained": {
+                            "summary": "Модель не обучена",
+                            "value": {
+                                "code": "model_not_trained",
+                                "message": "Model is not trained",
+                                "details": {},
+                            },
+                        },
+                        "invalid_type": {
+                            "summary": "Неверный тип поля",
+                            "value": {
+                                "code": "invalid_type",
+                                "message": "Request validation failed",
+                                "details": {
+                                    "errors": [
+                                        {
+                                            "field": "body.monthly_fee",
+                                            "message": "Input should be a valid number",
+                                            "type": "float_type",
+                                        }
+                                    ]
+                                },
+                            },
+                        },
+                        "invalid_feature_count": {
+                            "summary": "Неверное число признаков",
+                            "value": {
+                                "code": "invalid_feature_count",
+                                "message": "Request validation failed",
+                                "details": {
+                                    "errors": [
+                                        {
+                                            "field": "body.region",
+                                            "message": "Field required",
+                                            "type": "missing",
+                                        }
+                                    ]
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        },
     },
 )
 def predict(payload: list[FeatureVectorChurn] | FeatureVectorChurn = Body(
@@ -104,7 +161,10 @@ def predict(payload: list[FeatureVectorChurn] | FeatureVectorChurn = Body(
 )):
     model_status = get_model_status()
     if not model_status.is_trained:
-        raise HTTPException(status_code=400, detail="Model is not trained")
+        raise HTTPException(
+            status_code=400,
+            detail=error_detail("model_not_trained", "Model is not trained"),
+        )
 
     if isinstance(payload, list):
         predictions = []
@@ -132,7 +192,51 @@ def get_split_info(test_size: float = Query(0.2, gt=0, lt=1), random_state: int 
     return dataset_service.split_info(test_size=test_size, random_state=random_state)
 
 
-@app.post("/model/train", response_model=TrainMetricsResponse)
+@app.post(
+    "/model/train",
+    response_model=TrainMetricsResponse,
+    responses={
+        400: {
+            "description": "Данные или конфигурация не подходят для обучения",
+            "model": ErrorResponse,
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "empty_dataset": {
+                            "summary": "Пустой датасет",
+                            "value": {
+                                "code": "empty_dataset",
+                                "message": "Dataset is empty",
+                                "details": {},
+                            },
+                        },
+                        "unknown_model_type": {
+                            "summary": "Неизвестный тип модели",
+                            "value": {
+                                "code": "unknown_model_type",
+                                "message": "Unknown model type: svm",
+                                "details": {},
+                            },
+                        },
+                    }
+                }
+            },
+        },
+        404: {
+            "description": "Файл датасета не найден",
+            "model": ErrorResponse,
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": "file_not_found",
+                        "message": "Dataset file is not loaded",
+                        "details": {},
+                    }
+                }
+            },
+        },
+    },
+)
 def train_model(config: TrainingConfigChurn = Body(
     openapi_examples={
         "logreg": {
@@ -151,13 +255,25 @@ def train_model(config: TrainingConfigChurn = Body(
         )
         pipeline = train_churn_model(config=config, train_data=train_data)
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Dataset file is not loaded")
+        raise HTTPException(
+            status_code=404,
+            detail=error_detail("file_not_found", "Dataset file is not loaded"),
+        )
     except EmptyDatasetError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(
+            status_code=400,
+            detail=error_detail("empty_dataset", str(exc)),
+        )
     except UnknownModelTypeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(
+            status_code=400,
+            detail=error_detail("unknown_model_type", str(exc)),
+        )
     except TypeError as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid hyperparameters: {exc}")
+        raise HTTPException(
+            status_code=400,
+            detail=error_detail("invalid_hyperparameters", str(exc)),
+        )
 
     metrics = evaluate_churn_model(pipeline, test_data)
     persist_trained_model(pipeline, metrics, config)
@@ -172,3 +288,34 @@ def model_status():
 @app.get("/model/schema", response_model=dict)
 def get_model_schema():
     return dataset_service.schema()
+
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    if isinstance(exc.detail, dict) and "code" in exc.detail:
+        content = exc.detail
+    else:
+        content = error_detail("http_error", str(exc.detail))
+    return JSONResponse(status_code=exc.status_code, content=content)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = [
+        {
+            "field": ".".join(str(part) for part in err["loc"]),
+            "message": err["msg"],
+            "type": err["type"],
+        }
+        for err in exc.errors()
+    ]
+    specific = [item for item in errors if item["type"] != "list_type"]
+    if specific:
+        errors = specific
+    feature_errors = {"missing", "extra_forbidden"}
+    code = "invalid_feature_count" if any(item["type"] in feature_errors for item in errors) else "invalid_type"
+    return JSONResponse(
+        status_code=422,
+        content=error_detail(code, "Request validation failed", {"errors": errors}),
+    )
