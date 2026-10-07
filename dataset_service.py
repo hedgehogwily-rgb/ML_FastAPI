@@ -52,10 +52,13 @@ class ChurnDatasetService:
         if not self.csv_path.is_file():
             raise FileNotFoundError(f"Dataset file not found: {self.csv_path}")
 
-        self.df = pd.read_csv(
-            self.csv_path,
-            na_values=["", "None", "nan", "null", "NA", "NaN"],
-        )
+        try:
+            self.df = pd.read_csv(
+                self.csv_path,
+                na_values=["", "None", "nan", "null", "NA", "NaN"],
+            )
+        except pd.errors.EmptyDataError:
+            raise EmptyDatasetError("Dataset is empty")
 
         self._loaded = True
 
@@ -177,3 +180,12 @@ class ChurnDatasetService:
             train_churn_distribution=self._churn_distribution(y_train),
             test_churn_distribution=self._churn_distribution(y_test),
         )
+
+
+class ChurnServiceError(Exception):
+    def __init__(self, code: str, message: str, status_code: int = 400, details: dict | None = None):
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+        self.details = details or {}
+        super().__init__(message)

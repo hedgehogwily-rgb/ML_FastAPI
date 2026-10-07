@@ -1,3 +1,4 @@
+import math
 import pickle
 import pandas as pd
 from datetime import datetime
@@ -10,7 +11,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from typing import Any
-from dataset_service import CATEGORICAL_FEATURES, NUMERIC_FEATURES, PreparedData
+from dataset_service import CATEGORICAL_FEATURES, NUMERIC_FEATURES, ChurnServiceError, PreparedData
 from schemas import FeatureVectorChurn, ModelStatusResponse, PredictionResponseChurn, TrainMetricsResponse, TrainingConfigChurn
 
 MODEL_PATH = "models/churn_model.pkl"
@@ -175,9 +176,29 @@ def evaluate_churn_model(pipeline: Pipeline, test_data: PreparedData) -> TrainMe
 
 def predict_churn(feature_vector: FeatureVectorChurn) -> PredictionResponseChurn:
     pipeline = _pipeline
+    if pipeline is None:
+        raise ChurnServiceError("model_not_trained", "Model is not trained")
+
     row = pd.DataFrame([feature_vector.model_dump()])
-    predicted = int(pipeline.predict(row)[0])
-    proba = pipeline.predict_proba(row)[0]
+    numeric = row.select_dtypes(include="number")
+    non_finite = [
+        column
+        for column in numeric.columns
+        if not bool(numeric[column].map(math.isfinite).all())
+    ]
+    if non_finite:
+        raise ChurnServiceError(
+            "invalid_type",
+            "Numeric features must be finite numbers",
+            details={"fields": non_finite},
+        )
+
+    try:
+        predicted = int(pipeline.predict(row)[0])
+        proba = pipeline.predict_proba(row)[0]
+    except ValueError as exc:
+        raise ChurnServiceError("prediction_failed", str(exc)) from exc
+
     classes = pipeline.named_steps["classifier"].classes_
     probabilities = {str(label): float(value) for label, value in zip(classes, proba)}
     return PredictionResponseChurn(prediction=predicted, probabilities=probabilities)

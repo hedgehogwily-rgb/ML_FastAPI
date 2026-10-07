@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Query, Body, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from dataset_service import ChurnDatasetService, EmptyDatasetError
+from dataset_service import ChurnDatasetService, EmptyDatasetError, ChurnServiceError
 from model_service import (
     evaluate_churn_model,
     get_model_status,
@@ -254,6 +254,7 @@ def train_model(config: TrainingConfigChurn = Body(
             random_state=random_state,
         )
         pipeline = train_churn_model(config=config, train_data=train_data)
+        metrics = evaluate_churn_model(pipeline, test_data)
     except FileNotFoundError:
         raise HTTPException(
             status_code=404,
@@ -274,8 +275,12 @@ def train_model(config: TrainingConfigChurn = Body(
             status_code=400,
             detail=error_detail("invalid_hyperparameters", str(exc)),
         )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=error_detail("invalid_training_data", str(exc)),
+        )
 
-    metrics = evaluate_churn_model(pipeline, test_data)
     persist_trained_model(pipeline, metrics, config)
     return metrics
 
@@ -318,4 +323,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return JSONResponse(
         status_code=422,
         content=error_detail(code, "Request validation failed", {"errors": errors}),
+    )
+
+
+@app.exception_handler(ChurnServiceError)
+async def churn_service_error_handler(request: Request, exc: ChurnServiceError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=error_detail(exc.code, exc.message, exc.details),
     )
