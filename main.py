@@ -10,6 +10,7 @@ from model_service import (
     train_churn_model,
     predict_churn,
     UnknownModelTypeError,
+    get_model_metrics,
 )
 from schemas import (
     DatasetRowChurn,
@@ -332,3 +333,11 @@ async def churn_service_error_handler(request: Request, exc: ChurnServiceError):
         status_code=exc.status_code,
         content=error_detail(exc.code, exc.message, exc.details),
     )
+
+
+@app.get("/model/metrics")
+def model_metrics(
+    model_type: str | None = Query(None),
+    limit: int = Query(10, ge=1),
+):
+    return get_model_metrics(model_type=model_type, limit=limit)

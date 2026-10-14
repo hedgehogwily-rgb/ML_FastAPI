@@ -39,6 +39,7 @@ class SplitInfoResponse(BaseModel):
 class TrainMetricsResponse(BaseModel):
     accuracy: float
     f1: float
+    roc_auc: float
 
 
 class ModelStatusResponse(BaseModel):
@@ -64,3 +65,12 @@ class ErrorResponse(BaseModel):
     code: str
     message: str
     details: dict[str, Any]
+
+
+class ModelMetricsResponse(BaseModel):
+    timestamp: str
+    model_type: str
+    hyperparameters: dict[str, Any]
+    accuracy: float
+    f1: float
+    roc_auc: float

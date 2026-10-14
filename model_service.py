@@ -1,21 +1,23 @@
 import math
 import pickle
+import json
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from typing import Any
 from dataset_service import CATEGORICAL_FEATURES, NUMERIC_FEATURES, ChurnServiceError, PreparedData
-from schemas import FeatureVectorChurn, ModelStatusResponse, PredictionResponseChurn, TrainMetricsResponse, TrainingConfigChurn
+from schemas import FeatureVectorChurn, ModelStatusResponse, PredictionResponseChurn, TrainMetricsResponse, TrainingConfigChurn, ModelMetricsResponse
 
 MODEL_PATH = "models/churn_model.pkl"
 INFO_PATH = "models/churn_model_info.pkl"
+METRICS_PATH = "models/churn_model_metrics.json"
 
 _pipeline: Pipeline | None = None
 _trained_at: str | None = None
@@ -73,6 +75,34 @@ def load_churn_model(path: str = MODEL_PATH) -> Pipeline:
         return pickle.load(f)
 
 
+def save_model_metrics(metrics: ModelMetricsResponse) -> None:
+    history = load_metrics_history()
+    history.append(metrics.model_dump())
+    _ensure_models_dir()
+    with open(METRICS_PATH, "w", encoding="utf-8") as f:
+        json.dump(history, f, indent=2, ensure_ascii=False)
+
+def load_metrics_history() -> list[dict]:
+    path = Path(METRICS_PATH)
+    if not path.is_file():
+        return []
+    with path.open(encoding="utf-8") as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            return []
+    return data if isinstance(data, list) else []
+
+def get_model_metrics(model_type: str | None = None, limit: int = 10) -> dict:
+    history = load_metrics_history()
+    if model_type is not None:
+        history = [row for row in history if row["model_type"] == model_type]
+    recent = history[-limit:]
+    return {
+        "latest": recent[-1] if recent else None,
+        "history": recent,
+    }
+
 def _clear_loaded_model() -> None:
     global _pipeline, _trained_at, _accuracy, _f1, _model_type, _hyperparameters
     _pipeline = None
@@ -119,11 +149,23 @@ def load_model_info(path: str = INFO_PATH) -> dict | None:
     return info
 
 
-def persist_trained_model(pipeline: Pipeline, metrics: TrainMetricsResponse, config: TrainingConfigChurn) -> None:
+def persist_trained_model(
+    pipeline: Pipeline,
+    metrics: TrainMetricsResponse,
+    config: TrainingConfigChurn,
+) -> None:
     trained_at = datetime.now().isoformat(timespec="seconds")
     save_churn_model(pipeline)
     save_model_info(metrics.accuracy, metrics.f1, trained_at, config.model_type, config.hyperparameters)
     _store_loaded_model(pipeline, trained_at, metrics.accuracy, metrics.f1, config.model_type, config.hyperparameters)
+    save_model_metrics(ModelMetricsResponse(
+        timestamp=trained_at,
+        model_type=config.model_type,
+        hyperparameters=config.hyperparameters,
+        accuracy=metrics.accuracy,
+        f1=metrics.f1,
+        roc_auc=metrics.roc_auc,
+    ))
 
 
 def load_saved_model() -> None:
@@ -169,9 +211,11 @@ def train_churn_model(config: TrainingConfigChurn, train_data: PreparedData) -> 
 
 def evaluate_churn_model(pipeline: Pipeline, test_data: PreparedData) -> TrainMetricsResponse:
     y_pred = pipeline.predict(test_data.X)
+    y_proba = pipeline.predict_proba(test_data.X)[:, 1]
     return TrainMetricsResponse(
         accuracy=float(accuracy_score(test_data.y, y_pred)),
         f1=float(f1_score(test_data.y, y_pred, zero_division=0)),
+        roc_auc=float(roc_auc_score(test_data.y, y_proba)),
     )
 
 def predict_churn(feature_vector: FeatureVectorChurn) -> PredictionResponseChurn:
@@ -202,3 +246,4 @@ def predict_churn(feature_vector: FeatureVectorChurn) -> PredictionResponseChurn
     classes = pipeline.named_steps["classifier"].classes_
     probabilities = {str(label): float(value) for label, value in zip(classes, proba)}
     return PredictionResponseChurn(prediction=predicted, probabilities=probabilities)
+

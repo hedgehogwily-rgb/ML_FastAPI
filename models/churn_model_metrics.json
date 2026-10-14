@@ -1,0 +1,26 @@
+[
+  {
+    "timestamp": "2026-10-14T17:55:02",
+    "model_type": "logreg",
+    "hyperparameters": {
+      "C": 1.0,
+      "max_iter": 1000,
+      "random_state": 42
+    },
+    "accuracy": 0.7875,
+    "f1": 0.0449438202247191,
+    "roc_auc": 0.6091179999225975
+  },
+  {
+    "timestamp": "2026-10-14T17:55:02",
+    "model_type": "random_forest",
+    "hyperparameters": {
+      "n_estimators": 100,
+      "max_depth": 5,
+      "random_state": 42
+    },
+    "accuracy": 0.8,
+    "f1": 0.06976744186046512,
+    "roc_auc": 0.6212314718061844
+  }
+]
