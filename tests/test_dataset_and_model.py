@@ -1,8 +1,8 @@
 import pandas as pd
 import pytest
 
-from dataset_service import ChurnDatasetService, EmptyDatasetError
-from model_service import evaluate_churn_model, train_churn_model
+from ml.dataset import ChurnDatasetService, EmptyDatasetError
+from ml.pipeline import evaluate_churn_model, train_churn_model
 from schemas import TrainingConfigChurn
 
 

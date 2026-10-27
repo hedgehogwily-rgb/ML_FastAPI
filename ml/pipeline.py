@@ -1,23 +1,28 @@
+import json
 import math
 import pickle
-import json
-import pandas as pd
 from datetime import datetime
-from pathlib import Path
+from typing import Any
+
+import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from typing import Any
-from dataset_service import CATEGORICAL_FEATURES, NUMERIC_FEATURES, ChurnServiceError, PreparedData
-from schemas import FeatureVectorChurn, ModelStatusResponse, PredictionResponseChurn, TrainMetricsResponse, TrainingConfigChurn, ModelMetricsResponse
-
-MODEL_PATH = "models/churn_model.pkl"
-INFO_PATH = "models/churn_model_info.pkl"
-METRICS_PATH = "models/churn_model_metrics.json"
+from core.config import INFO_PATH, METRICS_PATH, MODEL_PATH, MODELS_DIR
+from core.errors import ChurnServiceError
+from ml.dataset import CATEGORICAL_FEATURES, NUMERIC_FEATURES, PreparedData
+from schemas import (
+    FeatureVectorChurn,
+    ModelMetricsResponse,
+    ModelStatusResponse,
+    PredictionResponseChurn,
+    TrainingConfigChurn,
+    TrainMetricsResponse,
+)
 
 _pipeline: Pipeline | None = None
 _trained_at: str | None = None
@@ -39,9 +44,7 @@ def build_classifier(config: TrainingConfigChurn):
     raise UnknownModelTypeError(f"Unknown model type: {config.model_type}")
 
 
-def build_churn_pipeline(
-    config: TrainingConfigChurn,
-) -> Pipeline:
+def build_churn_pipeline(config: TrainingConfigChurn) -> Pipeline:
     preprocessor = ColumnTransformer(
         transformers=[
             ("numeric", StandardScaler(), list(NUMERIC_FEATURES)),
@@ -61,37 +64,38 @@ def build_churn_pipeline(
 
 
 def _ensure_models_dir() -> None:
-    Path(MODEL_PATH).parent.mkdir(parents=True, exist_ok=True)
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def save_churn_model(pipeline: Pipeline, path: str = MODEL_PATH) -> None:
+def save_churn_model(pipeline: Pipeline, path=MODEL_PATH) -> None:
     _ensure_models_dir()
-    with open(path, "wb") as f:
-        pickle.dump(pipeline, f)
+    with open(path, "wb") as file:
+        pickle.dump(pipeline, file)
 
 
-def load_churn_model(path: str = MODEL_PATH) -> Pipeline:
-    with open(path, "rb") as f:
-        return pickle.load(f)
+def load_churn_model(path=MODEL_PATH) -> Pipeline:
+    with open(path, "rb") as file:
+        return pickle.load(file)
 
 
 def save_model_metrics(metrics: ModelMetricsResponse) -> None:
     history = load_metrics_history()
     history.append(metrics.model_dump())
     _ensure_models_dir()
-    with open(METRICS_PATH, "w", encoding="utf-8") as f:
-        json.dump(history, f, indent=2, ensure_ascii=False)
+    with open(METRICS_PATH, "w", encoding="utf-8") as file:
+        json.dump(history, file, indent=2, ensure_ascii=False)
+
 
 def load_metrics_history() -> list[dict]:
-    path = Path(METRICS_PATH)
-    if not path.is_file():
+    if not METRICS_PATH.is_file():
         return []
-    with path.open(encoding="utf-8") as f:
+    with METRICS_PATH.open(encoding="utf-8") as file:
         try:
-            data = json.load(f)
+            data = json.load(file)
         except json.JSONDecodeError:
             return []
     return data if isinstance(data, list) else []
+
 
 def get_model_metrics(model_type: str | None = None, limit: int = 10) -> dict:
     history = load_metrics_history()
@@ -103,6 +107,7 @@ def get_model_metrics(model_type: str | None = None, limit: int = 10) -> dict:
         "history": recent,
     }
 
+
 def _clear_loaded_model() -> None:
     global _pipeline, _trained_at, _accuracy, _f1, _model_type, _hyperparameters
     _pipeline = None
@@ -111,6 +116,7 @@ def _clear_loaded_model() -> None:
     _f1 = None
     _model_type = None
     _hyperparameters = None
+
 
 def _store_loaded_model(
     pipeline: Pipeline,
@@ -129,19 +135,32 @@ def _store_loaded_model(
     _hyperparameters = hyperparameters
 
 
-def save_model_info(accuracy: float, f1: float, trained_at: str, model_type: str, hyperparameters: dict[str, Any], path: str = INFO_PATH) -> None:
+def save_model_info(
+    accuracy: float,
+    f1: float,
+    trained_at: str,
+    model_type: str,
+    hyperparameters: dict[str, Any],
+    path=INFO_PATH,
+) -> None:
     _ensure_models_dir()
-    with open(path, "wb") as f:
+    with open(path, "wb") as file:
         pickle.dump(
-            {"trained_at": trained_at, "accuracy": accuracy, "f1": f1, "model_type": model_type, "hyperparameters": hyperparameters},
-            f,
+            {
+                "trained_at": trained_at,
+                "accuracy": accuracy,
+                "f1": f1,
+                "model_type": model_type,
+                "hyperparameters": hyperparameters,
+            },
+            file,
         )
 
 
-def load_model_info(path: str = INFO_PATH) -> dict | None:
+def load_model_info(path=INFO_PATH) -> dict | None:
     try:
-        with open(path, "rb") as f:
-            info = pickle.load(f)
+        with open(path, "rb") as file:
+            info = pickle.load(file)
     except FileNotFoundError:
         return None
     if not isinstance(info, dict) or "pipeline" in info:
@@ -157,7 +176,14 @@ def persist_trained_model(
     trained_at = datetime.now().isoformat(timespec="seconds")
     save_churn_model(pipeline)
     save_model_info(metrics.accuracy, metrics.f1, trained_at, config.model_type, config.hyperparameters)
-    _store_loaded_model(pipeline, trained_at, metrics.accuracy, metrics.f1, config.model_type, config.hyperparameters)
+    _store_loaded_model(
+        pipeline,
+        trained_at,
+        metrics.accuracy,
+        metrics.f1,
+        config.model_type,
+        config.hyperparameters,
+    )
     save_model_metrics(ModelMetricsResponse(
         timestamp=trained_at,
         model_type=config.model_type,
@@ -202,9 +228,7 @@ def get_model_status() -> ModelStatusResponse:
 
 
 def train_churn_model(config: TrainingConfigChurn, train_data: PreparedData) -> Pipeline:
-    pipeline = build_churn_pipeline(
-        config=config,
-    )
+    pipeline = build_churn_pipeline(config=config)
     pipeline.fit(train_data.X, train_data.y)
     return pipeline
 
@@ -217,6 +241,7 @@ def evaluate_churn_model(pipeline: Pipeline, test_data: PreparedData) -> TrainMe
         f1=float(f1_score(test_data.y, y_pred, zero_division=0)),
         roc_auc=float(roc_auc_score(test_data.y, y_proba)),
     )
+
 
 def predict_churn(feature_vector: FeatureVectorChurn) -> PredictionResponseChurn:
     pipeline = _pipeline
@@ -246,4 +271,3 @@ def predict_churn(feature_vector: FeatureVectorChurn) -> PredictionResponseChurn
     classes = pipeline.named_steps["classifier"].classes_
     probabilities = {str(label): float(value) for label, value in zip(classes, proba)}
     return PredictionResponseChurn(prediction=predicted, probabilities=probabilities)
-

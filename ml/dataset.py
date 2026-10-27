@@ -1,21 +1,23 @@
+import logging
 from pathlib import Path
 from dataclasses import dataclass
+
 import pandas as pd
-from schemas import DatasetRowChurn, SplitInfoResponse, FeatureVectorChurn
 from sklearn.model_selection import train_test_split
 
+from schemas import DatasetRowChurn, FeatureVectorChurn, SplitInfoResponse
 
 NUMERIC_FEATURES = [
-    "monthly_fee", 
-    "usage_hours", 
-    "support_requests", 
-    "account_age_months", 
-    "failed_payments", 
+    "monthly_fee",
+    "usage_hours",
+    "support_requests",
+    "account_age_months",
+    "failed_payments",
     "autopay_enabled",
 ]
 CATEGORICAL_FEATURES = [
-    "region", 
-    "device_type", 
+    "region",
+    "device_type",
     "payment_method",
 ]
 TARGET_COLUMN = "churn"
@@ -25,6 +27,7 @@ INTEGER_NUMERIC_FEATURES = [
     "failed_payments",
     "autopay_enabled",
 ]
+logger = logging.getLogger("churn")
 
 
 @dataclass
@@ -61,6 +64,7 @@ class ChurnDatasetService:
             raise EmptyDatasetError("Dataset is empty")
 
         self._loaded = True
+        logger.info("dataset loaded path=%s rows=%s", self.csv_path, len(self.df))
 
     def _clean_dataframe(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
         df = df.copy()
@@ -97,10 +101,10 @@ class ChurnDatasetService:
 
     def info(self) -> dict:
         self._ensure_loaded()
-        feature_columns = [c for c in self.df.columns if c != TARGET_COLUMN]
+        feature_columns = [column for column in self.df.columns if column != TARGET_COLUMN]
         churn_distribution = {
-            str(k): int(v)
-            for k, v in self.df[TARGET_COLUMN].value_counts(dropna=False).items()
+            str(label): int(count)
+            for label, count in self.df[TARGET_COLUMN].value_counts(dropna=False).items()
         }
         return {
             "rows_count": len(self.df),
@@ -112,13 +116,10 @@ class ChurnDatasetService:
     def schema(self) -> dict:
         features = []
         for name, field in FeatureVectorChurn.model_fields.items():
-
-            type_name = field.annotation.__name__
             role = "numeric" if name in NUMERIC_FEATURES else "categorical"
-            
             features.append({
                 "name": name,
-                "type": type_name,
+                "type": field.annotation.__name__,
                 "role": role,
             })
         return {"features": features}
@@ -132,15 +133,15 @@ class ChurnDatasetService:
             raise EmptyDatasetError("Dataset has no rows with a valid churn label")
 
         return PreparedData(
-            X=X, 
-            y=y, 
-            numeric_features=NUMERIC_FEATURES, 
+            X=X,
+            y=y,
+            numeric_features=NUMERIC_FEATURES,
             categorical_features=CATEGORICAL_FEATURES,
         )
 
     @staticmethod
     def _churn_distribution(y: pd.Series) -> dict[str, float]:
-        return {str(k): round(v, 4) for k, v in y.value_counts(normalize=True).items()}
+        return {str(label): round(share, 4) for label, share in y.value_counts(normalize=True).items()}
 
     def _split(
         self, test_size: float, random_state: int
@@ -159,15 +160,15 @@ class ChurnDatasetService:
         prepared_data, X_train, X_test, y_train, y_test = self._split(test_size, random_state)
         return (
             PreparedData(
-                X=X_train, 
-                y=y_train, 
-                numeric_features=prepared_data.numeric_features, 
+                X=X_train,
+                y=y_train,
+                numeric_features=prepared_data.numeric_features,
                 categorical_features=prepared_data.categorical_features,
             ),
             PreparedData(
-                X=X_test, 
-                y=y_test, 
-                numeric_features=prepared_data.numeric_features, 
+                X=X_test,
+                y=y_test,
+                numeric_features=prepared_data.numeric_features,
                 categorical_features=prepared_data.categorical_features,
             ),
         )
@@ -180,12 +181,3 @@ class ChurnDatasetService:
             train_churn_distribution=self._churn_distribution(y_train),
             test_churn_distribution=self._churn_distribution(y_test),
         )
-
-
-class ChurnServiceError(Exception):
-    def __init__(self, code: str, message: str, status_code: int = 400, details: dict | None = None):
-        self.code = code
-        self.message = message
-        self.status_code = status_code
-        self.details = details or {}
-        super().__init__(message)
